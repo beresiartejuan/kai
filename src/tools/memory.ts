@@ -1,4 +1,4 @@
-import { upsertMemory } from "../db/querys";
+import { upsertMemory, getMemory, getAllMemories } from "../db/querys";
 
 export const createMemoryTool = {
   type: "function",
@@ -23,10 +23,9 @@ export const createMemoryTool = {
           maximum: 1,
         },
       },
-      required: ["key", "value", "confidence"],
+      required: ["key", "value"],
     },
   },
-  // Function to be called when the model decides to use this tool
   execute: async (args: { key: string; value: string; confidence?: number }) => {
     try {
       const result = await upsertMemory(args.key, args.value, args.confidence);
@@ -39,6 +38,71 @@ export const createMemoryTool = {
       return JSON.stringify({
         success: false,
         message: `Failed to save memory: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  },
+};
+
+export const listMemoriesKeysTool = {
+  type: "function",
+  function: {
+    name: "list_memories_keys",
+    description: "Returns a list of all available memory keys. Use this to discover what the agent already knows.",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  execute: async () => {
+    try {
+      const all = await getAllMemories();
+      const keys = all.map(m => m.key);
+      return JSON.stringify({
+        success: true,
+        keys: keys,
+      });
+    } catch (error) {
+      return JSON.stringify({
+        success: false,
+        message: `Failed to list keys: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  },
+};
+
+export const getMemoriesTool = {
+  type: "function",
+  function: {
+    name: "get_memories",
+    description: "Retrieves specific memories by their keys.",
+    parameters: {
+      type: "object",
+      properties: {
+        keys: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of keys to retrieve (e.g., ['user_name', 'preferred_language']).",
+        },
+      },
+      required: ["keys"],
+    },
+  },
+  execute: async (args: { keys: string[] }) => {
+    try {
+      const results = await Promise.all(
+        args.keys.map(async (key) => {
+          const m = await getMemory(key);
+          return { key, value: m ? m.value : null, exists: !!m };
+        })
+      );
+      return JSON.stringify({
+        success: true,
+        memories: results,
+      });
+    } catch (error) {
+      return JSON.stringify({
+        success: false,
+        message: `Failed to retrieve memories: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
   },
