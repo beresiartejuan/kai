@@ -1,32 +1,45 @@
-import { Ollama } from "ollama";
+import * as providers from "../providers";
 import * as tools from "../tools";
 
-const ollama = new Ollama();
-// Main model (Cloud-based via Ollama)
-const MAIN_MODEL = "gpt-oss:20b-cloud"; 
-// Local model for summarization
-const SUMMARY_MODEL = "gemma3:1b";
+// Contador para alternar modelos
+let callCount = 0;
 
 export async function generateResponse(messages: any[]) {
+  const useMain = callCount % 2 === 0;
+  callCount++;
+
   const availableTools = Object.values(tools).map(t => ({
     type: t.type,
     function: t.function
   }));
 
-  const response = await ollama.chat({
-    model: MAIN_MODEL,
-    messages,
-    tools: availableTools as any,
-  });
-
-  return response;
+  if (useMain) {
+    // Principal: Ollama
+    return await providers.ollama.chat({
+      model: providers.models.main,
+      messages,
+      tools: availableTools as any,
+    });
+  } else {
+    // Secundario: OpenRouter
+    const response = await providers.openRouter.chat.completions.create({
+      model: providers.openRouterModel,
+      messages: messages as any,
+      tools: availableTools as any,
+    });
+    
+    // Adaptamos el formato de OpenRouter (OpenAI) al de Ollama para mantener consistencia
+    return {
+      message: response.choices[0]!.message
+    };
+  }
 }
 
 export async function summarizeText(text: string): Promise<string> {
   try {
-    const response = await ollama.generate({
-      model: SUMMARY_MODEL,
-      prompt: `Summarize the following text in less than 300 characters: ${text}`,
+    const response = await providers.ollama.generate({
+      model: providers.models.resumer,
+      prompt: `Resume el siguiente texto en menos de 100 caracteres preservando los datos clave: ${text}`,
       stream: false
     });
     return response.response.trim();
@@ -41,7 +54,9 @@ export async function processToolCalls(toolCalls: any[]) {
 
   for (const call of toolCalls) {
     const toolName = call.function.name;
-    const toolArgs = call.function.arguments;
+    const toolArgs = typeof call.function.arguments === 'string' 
+      ? JSON.parse(call.function.arguments) 
+      : call.function.arguments;
 
     const tool = Object.values(tools).find(t => t.function.name === toolName);
 
